@@ -20,3 +20,5 @@ local.properties
 .claude
 _bmad
 _bmad-output
+# Spec workflow tool directory
+.spec-workflow/
