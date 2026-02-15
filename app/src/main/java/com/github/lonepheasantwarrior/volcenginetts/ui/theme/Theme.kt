@@ -1,5 +1,6 @@
 package com.github.lonepheasantwarrior.volcenginetts.ui.theme
 
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -8,6 +9,16 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
+
+/**
+ * 主题模式枚举
+ */
+enum class ThemeMode {
+    FOLLOW_SYSTEM,  // 跟随系统
+    LIGHT,          // 浅色模式
+    DARK,           // 深色模式
+    AMOLED          // AMOLED纯黑模式
+}
 
 private val DarkColorScheme = darkColorScheme(
     primary = DarkPrimary,
@@ -26,6 +37,25 @@ private val DarkColorScheme = darkColorScheme(
     onSurface = DarkOnSurface,
     surfaceVariant = DarkSurface,
     onSurfaceVariant = DarkOnSurface,
+)
+
+private val AmoledColorScheme = darkColorScheme(
+    primary = AmoledPrimary,
+    onPrimary = AmoledOnPrimary,
+    primaryContainer = AmoledPrimaryVariant,
+    onPrimaryContainer = AmoledOnPrimary,
+    secondary = AmoledSecondary,
+    onSecondary = AmoledOnSecondary,
+    secondaryContainer = AmoledSurface,
+    onSecondaryContainer = AmoledOnSurface,
+    tertiary = Pink80,
+    onTertiary = AmoledOnPrimary,
+    background = AmoledBackground,
+    onBackground = AmoledOnBackground,
+    surface = AmoledSurface,
+    onSurface = AmoledOnSurface,
+    surfaceVariant = AmoledSurface,
+    onSurfaceVariant = AmoledOnSurface,
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -49,18 +79,40 @@ private val LightColorScheme = lightColorScheme(
 
 @Composable
 fun VolcengineTTSTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
+    themeMode: ThemeMode = ThemeMode.FOLLOW_SYSTEM,
+    useDynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
+    val context = LocalContext.current
+    val isSystemInDarkTheme = isSystemInDarkTheme()
+
+    // 判断是否支持动态颜色（Android 12+ / API 31+）
+    val supportsDynamicColor = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+
+    // 根据主题模式确定是否使用深色主题
+    val useDarkTheme = when (themeMode) {
+        ThemeMode.FOLLOW_SYSTEM -> isSystemInDarkTheme
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+        ThemeMode.AMOLED -> true
+    }
+
+    // 选择颜色方案
     val colorScheme = when {
-        dynamicColor -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        // AMOLED模式：使用纯黑主题（不使用动态颜色）
+        themeMode == ThemeMode.AMOLED -> AmoledColorScheme
+
+        // 动态颜色模式（支持三星One UI的多色彩方案）
+        useDynamicColor && supportsDynamicColor -> {
+            if (useDarkTheme) {
+                dynamicDarkColorScheme(context)
+            } else {
+                dynamicLightColorScheme(context)
+            }
         }
 
-        darkTheme -> DarkColorScheme
+        // 静态颜色模式
+        useDarkTheme -> DarkColorScheme
         else -> LightColorScheme
     }
 

@@ -33,6 +33,17 @@ val DarkOnSecondary = Color(0xFF000000)
 val DarkOnBackground = Color(0xFFFFFFFF)
 val DarkOnSurface = Color(0xFFE0E0E0)
 
+// AMOLED纯黑主题颜色
+val AmoledPrimary = Color(0xFFBB86FC)
+val AmoledPrimaryVariant = Color(0xFF3700B3)
+val AmoledSecondary = Color(0xFF03DAC6)
+val AmoledBackground = Color(0xFF000000)  // 纯黑背景
+val AmoledSurface = Color(0xFF000000)     // 纯黑表面
+val AmoledOnPrimary = Color(0xFF000000)
+val AmoledOnSecondary = Color(0xFF000000)
+val AmoledOnBackground = Color(0xFFFFFFFF)
+val AmoledOnSurface = Color(0xFFE0E0E0)
+
 // 语音合成相关颜色
 val SynthButtonLight = Color(0xFF4CAF50)
 val SynthButtonDark = Color(0xFF66BB6A)
