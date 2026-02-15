@@ -17,3 +17,6 @@ local.properties
 /.kotlin/
 /.vscode/
 /app/release/
+.claude
+_bmad
+_bmad-output
