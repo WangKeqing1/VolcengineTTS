@@ -16,6 +16,11 @@ android {
         versionName = "1.0.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // 只打包 ARM 架构的原生库（火山引擎 SDK 不支持 x86/x86_64）
+        ndk {
+            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
+        }
     }
 
     buildTypes {
@@ -67,7 +72,10 @@ dependencies {
 
     //火山引擎-豆包语音
     implementation(libs.speechengine.tob)
-    
+
     // OkHttp for network requests
     implementation(libs.okhttp)
+
+    // Jetpack Security Crypto for encrypted storage
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 }
