@@ -13,6 +13,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,9 +25,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -35,13 +41,18 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,34 +72,78 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.github.lonepheasantwarrior.volcenginetts.common.Constants
 import com.github.lonepheasantwarrior.volcenginetts.common.LogTag
+import com.github.lonepheasantwarrior.volcenginetts.common.TtsCallLog
 import com.github.lonepheasantwarrior.volcenginetts.engine.SynthesisEngine
 import com.github.lonepheasantwarrior.volcenginetts.function.SettingsFunction
-import com.github.lonepheasantwarrior.volcenginetts.function.UpdateFunction
 import com.github.lonepheasantwarrior.volcenginetts.tts.TtsVoiceSample
-import com.github.lonepheasantwarrior.volcenginetts.ui.UpdateDialog
-import com.github.lonepheasantwarrior.volcenginetts.ui.UpdateErrorDialog
+import com.github.lonepheasantwarrior.volcenginetts.ui.LogsScreen
+import com.github.lonepheasantwarrior.volcenginetts.ui.SettingsScreen
 import com.github.lonepheasantwarrior.volcenginetts.ui.WelcomeDialog
+import com.github.lonepheasantwarrior.volcenginetts.ui.theme.ThemeMode
 import com.github.lonepheasantwarrior.volcenginetts.ui.theme.VolcengineTTSTheme
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private val synthesisEngine: SynthesisEngine get() = (applicationContext as TTSApplication).synthesisEngine
     internal val settingsFunction: SettingsFunction get() = (applicationContext as TTSApplication).settingsFunction
-    internal val updateFunction: UpdateFunction by lazy { UpdateFunction(this) }
-    internal val coroutineScope = CoroutineScope(Dispatchers.Main)
-    internal var updateCheckJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         setContent {
-            VolcengineTTSTheme {
-                UpdateCheckContent()
+            // 从设置中读取主题配置
+            var themeMode by remember { mutableStateOf(settingsFunction.getThemeMode()) }
+            var useDynamicColor by remember { mutableStateOf(settingsFunction.getUseDynamicColor()) }
+            var enableLogging by remember { mutableStateOf(settingsFunction.getEnableLogging()) }
+            var showSettings by remember { mutableStateOf(false) }
+            var showLogs by remember { mutableStateOf(false) }
+
+            VolcengineTTSTheme(
+                themeMode = themeMode,
+                useDynamicColor = useDynamicColor
+            ) {
+                if (showLogs) {
+                    val logFunction = (applicationContext as TTSApplication).logFunction
+                    var logs by remember { mutableStateOf(logFunction.readLogs()) }
+                    var statistics by remember { mutableStateOf(logFunction.getLogStatistics()) }
+
+                    LogsScreen(
+                        logs = logs,
+                        statistics = statistics,
+                        onClearLogs = {
+                            logFunction.clearLogs()
+                            logs = logFunction.readLogs()
+                            statistics = logFunction.getLogStatistics()
+                        },
+                        onBackClick = { showLogs = false },
+                        formatTimestamp = { timestamp -> logFunction.formatTimestamp(timestamp) }
+                    )
+                } else if (showSettings) {
+                    SettingsScreen(
+                        currentThemeMode = themeMode,
+                        currentUseDynamicColor = useDynamicColor,
+                        currentEnableLogging = enableLogging,
+                        onThemeModeChange = { mode ->
+                            themeMode = mode
+                            settingsFunction.saveThemeSettings(mode, useDynamicColor)
+                        },
+                        onDynamicColorChange = { enabled ->
+                            useDynamicColor = enabled
+                            settingsFunction.saveThemeSettings(themeMode, enabled)
+                        },
+                        onLoggingChange = { enabled ->
+                            enableLogging = enabled
+                            settingsFunction.saveLoggingSettings(enabled)
+                        },
+                        onViewLogsClick = { showLogs = true },
+                        onBackClick = { showSettings = false }
+                    )
+                } else {
+                    MainContent(
+                        onSettingsClick = { showSettings = true }
+                    )
+                }
             }
         }
     }
@@ -96,34 +151,6 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         synthesisEngine.destroy()
-        updateCheckJob?.cancel()
-    }
-
-    /**
-     * 检查更新
-     */
-    internal fun checkForUpdate(
-        onUpdateAvailable: (version: String, releaseNotes: String, downloadUrl: String) -> Unit = { _, _, _ -> },
-        onError: (message: String) -> Unit = { _ -> },
-        onNoUpdate: () -> Unit = {}
-    ) {
-        updateCheckJob?.cancel()
-        updateCheckJob = coroutineScope.launch {
-            val pInfo = applicationContext.packageManager.getPackageInfo(applicationContext.packageName, 0)
-            val currentVersion = pInfo.versionName // 从build.gradle.kts获取的版本号
-            if (currentVersion == null || currentVersion.isBlank()) {
-                throw RuntimeException("未能获取到当前应用的版本号信息")
-            }
-            val result = updateFunction.checkForUpdate(currentVersion)
-            
-            if (result.isUpdateAvailable()) {
-                onUpdateAvailable(result.version, result.releaseNotes, result.downloadUrl)
-            } else if (result.isError()) {
-                onError(result.message)
-            } else if (result.isNoUpdate()) {
-                onNoUpdate()
-            }
-        }
     }
 }
 
@@ -137,6 +164,7 @@ data class SpeakerInfo(
 class VolcengineTTSViewModel(application: Application) : AndroidViewModel(application) {
     private val synthesisEngine: SynthesisEngine get() = (getApplication() as TTSApplication).synthesisEngine
     private val settingsFunction: SettingsFunction get() = (getApplication() as TTSApplication).settingsFunction
+    private val logFunction get() = (getApplication() as TTSApplication).logFunction
 
     // 应用配置状态
     var appId by mutableStateOf("")
@@ -146,6 +174,19 @@ class VolcengineTTSViewModel(application: Application) : AndroidViewModel(applic
     var serviceCluster by mutableStateOf(Constants.DEFAULT_SERVICE_CLUSTER)
         private set
     var isEmotional by mutableStateOf(false)
+
+    // 音频参数
+    var speedRatio by mutableStateOf(1.0f)
+    var loudnessRatio by mutableStateOf(1.0f)
+    var encoding by mutableStateOf("pcm")
+    var sampleRate by mutableStateOf(16000)
+
+    // 情感参数
+    var emotion by mutableStateOf("")
+    var emotionScale by mutableStateOf(3)
+
+    // 语言参数
+    var explicitLanguage by mutableStateOf("")
 
     // UI 交互状态
     var selectedScene by mutableStateOf("")
@@ -262,7 +303,14 @@ class VolcengineTTSViewModel(application: Application) : AndroidViewModel(applic
                 token,
                 selectedSpeakerId,
                 serviceCluster,
-                isEmotional
+                isEmotional,
+                speedRatio,
+                loudnessRatio,
+                encoding,
+                sampleRate,
+                emotion,
+                emotionScale,
+                explicitLanguage
             )
         }
     }
@@ -272,22 +320,28 @@ class VolcengineTTSViewModel(application: Application) : AndroidViewModel(applic
      */
     private fun loadSettings() {
         val settingsData = settingsFunction.getSettings()
-        val (savedAppId, savedToken, savedSelectedSpeakerId, savedServiceCluster, savedIsEmotional) = settingsData
-        if (savedAppId.isNotEmpty()) {
-            appId = savedAppId
+        if (settingsData.appId.isNotEmpty()) {
+            appId = settingsData.appId
         }
-        if (savedToken.isNotEmpty()) {
-            token = savedToken
+        if (settingsData.token.isNotEmpty()) {
+            token = settingsData.token
         }
-        if (savedSelectedSpeakerId.isNotEmpty()) {
-            selectedSpeakerId = savedSelectedSpeakerId
+        if (settingsData.selectedSpeakerId.isNotEmpty()) {
+            selectedSpeakerId = settingsData.selectedSpeakerId
             // 根据保存的声音ID查找对应的声音名称
-            findSpeakerNameById(savedSelectedSpeakerId)
+            findSpeakerNameById(settingsData.selectedSpeakerId)
         }
-        if (savedServiceCluster.isNotEmpty()) {
-            serviceCluster = savedServiceCluster
+        if (settingsData.serviceCluster.isNotEmpty()) {
+            serviceCluster = settingsData.serviceCluster
         }
-        isEmotional = savedIsEmotional
+        isEmotional = settingsData.isEmotional
+        speedRatio = settingsData.speedRatio
+        loudnessRatio = settingsData.loudnessRatio
+        encoding = settingsData.encoding
+        sampleRate = settingsData.sampleRate
+        emotion = settingsData.emotion
+        emotionScale = settingsData.emotionScale
+        explicitLanguage = settingsData.explicitLanguage
     }
 
     /**
@@ -325,12 +379,28 @@ class VolcengineTTSViewModel(application: Application) : AndroidViewModel(applic
             }
             val sampleText = TtsVoiceSample.getByLocate(getApplication(), Locale.getDefault())
 
-            // 使用SynthesisEngine播放示例文本
+            // 使用SynthesisEngine播放示例文本，传入所有配置参数
             synthesisEngine.create(
                 appId, token,
-                selectedSpeakerId, serviceCluster, isEmotional
+                selectedSpeakerId, serviceCluster, isEmotional,
+                sampleRate, encoding, emotion, explicitLanguage
             )
-            synthesisEngine.startEngine(sampleText, null, null, null)
+            synthesisEngine.startEngine(sampleText, speedRatio, loudnessRatio, null, emotionScale)
+
+            // 记录成功日志
+            if (settingsFunction.getEnableLogging()) {
+                val log = TtsCallLog(
+                    timestamp = System.currentTimeMillis(),
+                    speakerId = selectedSpeakerId,
+                    speakerName = selectedSpeakerName,
+                    scene = selectedScene,
+                    textLength = sampleText.length,
+                    isEmotional = isEmotional,
+                    success = true,
+                    errorMessage = null
+                )
+                logFunction.addLog(log)
+            }
         } catch (e: Exception) {
             Log.e(LogTag.ERROR, "播放演示声音失败: ${e.message}")
             Toast.makeText(
@@ -338,6 +408,21 @@ class VolcengineTTSViewModel(application: Application) : AndroidViewModel(applic
                 "播放演示声音失败: ${e.message}",
                 Toast.LENGTH_SHORT
             ).show()
+
+            // 记录失败日志
+            if (settingsFunction.getEnableLogging()) {
+                val log = TtsCallLog(
+                    timestamp = System.currentTimeMillis(),
+                    speakerId = selectedSpeakerId,
+                    speakerName = selectedSpeakerName,
+                    scene = selectedScene,
+                    textLength = 0,
+                    isEmotional = isEmotional,
+                    success = false,
+                    errorMessage = e.message
+                )
+                logFunction.addLog(log)
+            }
         }
     }
 }
@@ -440,6 +525,26 @@ fun VolcengineTTSUI(modifier: Modifier = Modifier) {
             }
 
             item {
+                // 高级配置组 (语速、音量、编码等)
+                TTSAdvancedConfigurationInputs(
+                    speedRatio = viewModel.speedRatio,
+                    loudnessRatio = viewModel.loudnessRatio,
+                    encoding = viewModel.encoding,
+                    sampleRate = viewModel.sampleRate,
+                    emotion = viewModel.emotion,
+                    emotionScale = viewModel.emotionScale,
+                    explicitLanguage = viewModel.explicitLanguage,
+                    onSpeedRatioChange = { viewModel.speedRatio = it },
+                    onLoudnessRatioChange = { viewModel.loudnessRatio = it },
+                    onEncodingChange = { viewModel.encoding = it },
+                    onSampleRateChange = { viewModel.sampleRate = it },
+                    onEmotionChange = { viewModel.emotion = it },
+                    onEmotionScaleChange = { viewModel.emotionScale = it },
+                    onExplicitLanguageChange = { viewModel.explicitLanguage = it }
+                )
+            }
+
+            item {
                 // 保存设置按钮组
                 TTSSaveSettingsButton(
                     onClick = { viewModel.saveSettings() }
@@ -461,6 +566,8 @@ fun TTSBasicConfigurationInputs(
     onTokenChange: (String) -> Unit,
     onServiceClusterChange: (String) -> Unit
 ) {
+    val focusManager = LocalFocusManager.current
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -489,6 +596,11 @@ fun TTSBasicConfigurationInputs(
                 onValueChange = onAppIdChange,
                 label = { Text(stringResource(id = R.string.input_app_id)) },
                 modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                keyboardActions = KeyboardActions(
+                    onNext = { focusManager.moveFocus(androidx.compose.ui.focus.FocusDirection.Down) }
+                ),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = if (isAppIdError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = if (isAppIdError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface.copy(
@@ -514,6 +626,11 @@ fun TTSBasicConfigurationInputs(
                 onValueChange = onTokenChange,
                 label = { Text(stringResource(id = R.string.input_token)) },
                 modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                keyboardActions = KeyboardActions(
+                    onNext = { focusManager.moveFocus(androidx.compose.ui.focus.FocusDirection.Down) }
+                ),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = if (isTokenError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = if (isTokenError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface.copy(
@@ -539,6 +656,11 @@ fun TTSBasicConfigurationInputs(
                 onValueChange = onServiceClusterChange,
                 label = { Text(stringResource(id = R.string.input_service_cluster)) },
                 modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(
+                    onDone = { focusManager.clearFocus() }
+                ),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = if (isServiceClusterError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = if (isServiceClusterError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface.copy(
@@ -827,20 +949,34 @@ fun TTSSaveSettingsButton(
 }
 
 /**
- * 更新检查内容组件
+ * 主内容组件
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MainActivity.UpdateCheckContent() {
-    // 更新检查相关状态
-    var showUpdateDialog by remember { mutableStateOf(false) }
-    var showUpdateErrorDialog by remember { mutableStateOf(false) }
-    var updateVersion by remember { mutableStateOf("") }
-    var updateReleaseNotes by remember { mutableStateOf("") }
-    var updateDownloadUrl by remember { mutableStateOf("") }
-    var updateErrorMessage by remember { mutableStateOf("") }
-
+private fun MainActivity.MainContent(
+    onSettingsClick: () -> Unit
+) {
     Box(modifier = Modifier.fillMaxSize()) {
-        Scaffold(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            topBar = {
+                TopAppBar(
+                    title = { Text("火山引擎TTS") },
+                    actions = {
+                        IconButton(onClick = onSettingsClick) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "设置"
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                )
+            }
+        ) {
             VolcengineTTSUI(modifier = Modifier.padding(it))
         }
 
@@ -857,49 +993,258 @@ private fun MainActivity.UpdateCheckContent() {
                 }
             )
         }
-
-        // 显示更新弹窗
-        if (showUpdateDialog) {
-            UpdateDialog(
-                version = updateVersion,
-                releaseNotes = updateReleaseNotes,
-                onDownload = {
-                    updateFunction.downloadApk(updateDownloadUrl)
-                    showUpdateDialog = false
-                },
-                onCancel = {
-                    showUpdateDialog = false
-                }
-            )
-        }
-
-        // 显示更新错误弹窗
-        if (showUpdateErrorDialog) {
-            UpdateErrorDialog(
-                errorMessage = updateErrorMessage,
-                onDismiss = {
-                    showUpdateErrorDialog = false
-                }
-            )
-        }
     }
+}
 
-    // 应用启动时检查更新
-    LaunchedEffect(Unit) {
-        checkForUpdate(
-            onUpdateAvailable = { version, releaseNotes, downloadUrl ->
-                showUpdateDialog = true
-                updateVersion = version
-                updateReleaseNotes = releaseNotes
-                updateDownloadUrl = downloadUrl
-            },
-            onError = { message ->
-                showUpdateErrorDialog = true
-                updateErrorMessage = message
-            },
-            onNoUpdate = {
-                // 没有更新，不显示任何弹窗
-            }
+/**
+ * TTS高级配置输入组件
+ */
+@Composable
+fun TTSAdvancedConfigurationInputs(
+    speedRatio: Float,
+    loudnessRatio: Float,
+    encoding: String,
+    sampleRate: Int,
+    emotion: String,
+    emotionScale: Int,
+    explicitLanguage: String,
+    onSpeedRatioChange: (Float) -> Unit,
+    onLoudnessRatioChange: (Float) -> Unit,
+    onEncodingChange: (String) -> Unit,
+    onSampleRateChange: (Int) -> Unit,
+    onEmotionChange: (String) -> Unit,
+    onEmotionScaleChange: (Int) -> Unit,
+    onExplicitLanguageChange: (String) -> Unit
+) {
+    var encodingDropdownExpanded by remember { mutableStateOf(false) }
+    var sampleRateDropdownExpanded by remember { mutableStateOf(false) }
+    var isExpanded by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
         )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // 标题和展开/收起按钮
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { isExpanded = !isExpanded },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "高级配置",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = if (isExpanded) "收起 ▲" else "展开 ▼",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            // 可展开的内容
+            AnimatedVisibility(visible = isExpanded) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // 语速滑块
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "语速: ${String.format("%.2f", speedRatio)}x",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Slider(
+                            value = speedRatio,
+                            onValueChange = onSpeedRatioChange,
+                            valueRange = 0.1f..2.0f,
+                            steps = 18,
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.primary,
+                                activeTrackColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                        Text(
+                            text = "范围: 0.1x - 2.0x",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // 音量滑块
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "音量: ${String.format("%.2f", loudnessRatio)}x",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Slider(
+                            value = loudnessRatio,
+                            onValueChange = onLoudnessRatioChange,
+                            valueRange = 0.5f..2.0f,
+                            steps = 14,
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.primary,
+                                activeTrackColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                        Text(
+                            text = "范围: 0.5x - 2.0x",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // 编码格式选择器
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "音频编码格式",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+
+                        OutlinedButton(
+                            onClick = { encodingDropdownExpanded = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                contentColor = MaterialTheme.colorScheme.onSurface
+                            ),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                        ) {
+                            Text(
+                                text = encoding.uppercase(),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(
+                                imageVector = Icons.Default.ArrowDropDown,
+                                contentDescription = null
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = encodingDropdownExpanded,
+                            onDismissRequest = { encodingDropdownExpanded = false }
+                        ) {
+                            listOf("pcm", "wav", "mp3", "ogg_opus").forEach { format ->
+                                DropdownMenuItem(
+                                    text = { Text(format.uppercase()) },
+                                    onClick = {
+                                        onEncodingChange(format)
+                                        encodingDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // 采样率选择器
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "采样率",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+
+                        OutlinedButton(
+                            onClick = { sampleRateDropdownExpanded = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                contentColor = MaterialTheme.colorScheme.onSurface
+                            ),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                        ) {
+                            Text(
+                                text = "$sampleRate Hz",
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(
+                                imageVector = Icons.Default.ArrowDropDown,
+                                contentDescription = null
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = sampleRateDropdownExpanded,
+                            onDismissRequest = { sampleRateDropdownExpanded = false }
+                        ) {
+                            listOf(8000, 16000, 24000).forEach { rate ->
+                                DropdownMenuItem(
+                                    text = { Text("$rate Hz") },
+                                    onClick = {
+                                        onSampleRateChange(rate)
+                                        sampleRateDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // 情感类型输入框
+                    OutlinedTextField(
+                        value = emotion,
+                        onValueChange = onEmotionChange,
+                        label = { Text("情感类型 (可选)") },
+                        placeholder = { Text("如: happy, sad, angry") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        )
+                    )
+
+                    // 情感强度滑块
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "情感强度: $emotionScale",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Slider(
+                            value = emotionScale.toFloat(),
+                            onValueChange = { onEmotionScaleChange(it.toInt()) },
+                            valueRange = 1f..5f,
+                            steps = 3,
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.primary,
+                                activeTrackColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                        Text(
+                            text = "范围: 1 - 5",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // 明确语言输入框
+                    OutlinedTextField(
+                        value = explicitLanguage,
+                        onValueChange = onExplicitLanguageChange,
+                        label = { Text("明确语言 (可选)") },
+                        placeholder = { Text("如: zh-CN, en-US") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        )
+                    )
+                }
+            }
+        }
     }
 }

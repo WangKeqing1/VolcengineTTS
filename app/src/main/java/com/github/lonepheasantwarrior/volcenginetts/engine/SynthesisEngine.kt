@@ -36,7 +36,11 @@ class SynthesisEngine(private val context: Context) {
         token: String,
         speakerId: String,
         serviceCluster: String,
-        isEmotional: Boolean
+        isEmotional: Boolean,
+        sampleRate: Int = 16000,
+        encoding: String = "pcm",
+        emotion: String = "",
+        explicitLanguage: String = ""
     ): SpeechEngine {
         if (mSpeechEngine != null) {
             destroy()
@@ -45,7 +49,7 @@ class SynthesisEngine(private val context: Context) {
         mSpeechEngine!!.createEngine()
         Log.d(LogTag.SDK_INFO, "语音合成SDK版本号: " + mSpeechEngine!!.version)
         // 初始化引擎配置
-        setEngineParams(appId, token, speakerId, serviceCluster, isEmotional)
+        setEngineParams(appId, token, speakerId, serviceCluster, isEmotional, sampleRate, encoding, emotion, explicitLanguage)
         return mSpeechEngine!!
     }
 
@@ -57,7 +61,11 @@ class SynthesisEngine(private val context: Context) {
         token: String,
         speakerId: String,
         serviceCluster: String,
-        isEmotional: Boolean
+        isEmotional: Boolean,
+        sampleRate: Int = 16000,
+        encoding: String = "pcm",
+        emotion: String = "",
+        explicitLanguage: String = ""
     ) {
         //配置工作场景
         mSpeechEngine!!.setOptionString(
@@ -76,10 +84,10 @@ class SynthesisEngine(private val context: Context) {
             SpeechEngineDefines.PARAMS_KEY_AUDIO_STREAM_TYPE_INT,
             SpeechEngineDefines.AUDIO_STREAM_TYPE_MEDIA
         )
-        //合成出的音频的采样率，默认为 24000
+        //合成出的音频的采样率，使用用户配置的采样率
         mSpeechEngine!!.setOptionInt(
             SpeechEngineDefines.PARAMS_KEY_TTS_SAMPLE_RATE_INT,
-            context.resources.getInteger(R.integer.tts_sample_rate)
+            sampleRate
         )
         //appId
         mSpeechEngine!!.setOptionString(SpeechEngineDefines.PARAMS_KEY_APP_ID_STRING, appId)
@@ -110,7 +118,7 @@ class SynthesisEngine(private val context: Context) {
         mSpeechEngine!!.setOptionString(
             SpeechEngineDefines.PARAMS_KEY_TTS_VOICE_TYPE_ONLINE_STRING, speakerId
         )
-        //在线合成使用的“发音人类型”
+        //在线合成使用的"发音人类型"
         mSpeechEngine!!.setOptionString(
             SpeechEngineDefines.PARAMS_KEY_TTS_VOICE_ONLINE_STRING, Constants.VOICE
         )
@@ -123,6 +131,21 @@ class SynthesisEngine(private val context: Context) {
             SpeechEngineDefines.PARAMS_KEY_TTS_WITH_INTENT_BOOL,
             isEmotional
         )
+
+        // 设置情感类型（如果提供）
+        if (emotion.isNotEmpty()) {
+            mSpeechEngine!!.setOptionString(
+                "emotion", emotion
+            )
+        }
+
+        // 设置明确语言（如果提供）
+        if (explicitLanguage.isNotEmpty()) {
+            mSpeechEngine!!.setOptionString(
+                "language", explicitLanguage
+            )
+        }
+
         //User ID（用以辅助定位线上用户问题）
         mSpeechEngine!!.setOptionString(
             SpeechEngineDefines.PARAMS_KEY_UID_STRING,
@@ -142,9 +165,10 @@ class SynthesisEngine(private val context: Context) {
      */
     fun startEngine(
         text: CharSequence?,
-        speedRatio: Int?,
-        volumeRatio: Int?,
-        pitchRatio: Int?
+        speedRatio: Float?,
+        volumeRatio: Float?,
+        pitchRatio: Int?,
+        emotionScale: Int? = null
     ) {
         if (!isCreated) {
             Log.e(LogTag.SDK_ERROR, "语音合成引擎未成功创建,无法执行合成参数配置操作")
@@ -169,7 +193,7 @@ class SynthesisEngine(private val context: Context) {
                 Toast.makeText(context, "历史引擎关闭失败: $ret", Toast.LENGTH_SHORT).show()
             }
         } else {
-            setTTSParams(text, speedRatio, volumeRatio, pitchRatio)
+            setTTSParams(text, speedRatio, volumeRatio, pitchRatio, emotionScale)
             ret = mSpeechEngine!!.sendDirective(SpeechEngineDefines.DIRECTIVE_START_ENGINE, "")
             if (ret != SpeechEngineDefines.ERR_NO_ERROR) {
                 Log.e(LogTag.SDK_ERROR, "引擎启动失败: $ret")
@@ -190,9 +214,10 @@ class SynthesisEngine(private val context: Context) {
      */
     fun setTTSParams(
         text: CharSequence?,
-        speedRatio: Int?,
-        volumeRatio: Int?,
-        pitchRatio: Int?
+        speedRatio: Float?,
+        volumeRatio: Float?,
+        pitchRatio: Int?,
+        emotionScale: Int? = null
     ) {
         if (text.isNullOrBlank()) {
             Log.e(LogTag.ERROR, "待合成文本为空")
@@ -215,16 +240,23 @@ class SynthesisEngine(private val context: Context) {
 
         //用于控制 TTS 音频的语速，支持的配置范围参考火山官网 语音技术/语音合成/离在线语音合成SDK/参数说明 文档
         if (speedRatio != null) {
+            // 将 Float 类型的 speedRatio (0.1-2.0) 转换为 SDK 需要的 Int 类型
+            // SDK 的语速范围通常是 -500 到 500，对应 0.5x 到 2.0x
+            // 我们的范围是 0.1 到 2.0，需要映射到 SDK 的范围
+            val sdkSpeedRatio = ((speedRatio - 1.0f) * 500).toInt()
             mSpeechEngine!!.setOptionInt(
                 SpeechEngineDefines.PARAMS_KEY_TTS_SPEED_INT,
-                speedRatio / 10
+                sdkSpeedRatio
             )
         }
         //用于控制 TTS 音频的音量，支持的配置范围参考火山官网 语音技术/语音合成/离在线语音合成SDK/参数说明 文档
         if (volumeRatio != null) {
+            // 将 Float 类型的 volumeRatio (0.5-2.0) 转换为 SDK 需要的 Int 类型
+            // SDK 的音量范围通常是 -500 到 500，对应 0.5x 到 2.0x
+            val sdkVolumeRatio = ((volumeRatio - 1.0f) * 500).toInt()
             mSpeechEngine!!.setOptionInt(
                 SpeechEngineDefines.PARAMS_KEY_TTS_VOLUME_INT,
-                volumeRatio / 10
+                sdkVolumeRatio
             )
         }
         //用于控制 TTS 音频的音高，支持的配置范围参考火山官网 语音技术/语音合成/离在线语音合成SDK/参数说明 文档
@@ -232,6 +264,13 @@ class SynthesisEngine(private val context: Context) {
             mSpeechEngine!!.setOptionInt(
                 SpeechEngineDefines.PARAMS_KEY_TTS_PITCH_INT,
                 pitchRatio / 10
+            )
+        }
+
+        // 设置情感强度（如果提供）
+        if (emotionScale != null) {
+            mSpeechEngine!!.setOptionInt(
+                "emotion_scale", emotionScale
             )
         }
 

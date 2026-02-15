@@ -6,6 +6,7 @@ import com.bytedance.speech.speechengine.SpeechEngineGenerator
 import com.github.lonepheasantwarrior.volcenginetts.common.LogTag
 import com.github.lonepheasantwarrior.volcenginetts.engine.SynthesisEngine
 import com.github.lonepheasantwarrior.volcenginetts.engine.SynthesisEngineListener
+import com.github.lonepheasantwarrior.volcenginetts.function.LogFunction
 import com.github.lonepheasantwarrior.volcenginetts.function.SettingsFunction
 import com.github.lonepheasantwarrior.volcenginetts.tts.TTSContext
 
@@ -13,6 +14,7 @@ class TTSApplication: Application() {
     lateinit var synthesisEngine: SynthesisEngine private set
     lateinit var synthesisEngineListener: SynthesisEngineListener private set
     lateinit var settingsFunction: SettingsFunction private set
+    lateinit var logFunction: LogFunction private set
     lateinit var ttsContext: TTSContext private set
 
     override fun onCreate() {
@@ -25,6 +27,7 @@ class TTSApplication: Application() {
         synthesisEngine = SynthesisEngine(this)
         synthesisEngineListener = SynthesisEngineListener(this)
         settingsFunction = SettingsFunction(this)
+        logFunction = LogFunction(this)
         ttsContext = TTSContext()
     }
 }

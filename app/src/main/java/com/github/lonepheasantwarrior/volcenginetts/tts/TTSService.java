@@ -15,7 +15,9 @@ import com.github.lonepheasantwarrior.volcenginetts.TTSApplication;
 import com.github.lonepheasantwarrior.volcenginetts.common.Constants;
 import com.github.lonepheasantwarrior.volcenginetts.common.LogTag;
 import com.github.lonepheasantwarrior.volcenginetts.common.SettingsData;
+import com.github.lonepheasantwarrior.volcenginetts.common.TtsCallLog;
 import com.github.lonepheasantwarrior.volcenginetts.engine.SynthesisEngine;
+import com.github.lonepheasantwarrior.volcenginetts.function.LogFunction;
 import com.github.lonepheasantwarrior.volcenginetts.function.SettingsFunction;
 
 import org.jetbrains.annotations.Nullable;
@@ -33,6 +35,7 @@ public class TTSService extends TextToSpeechService {
 
     private SynthesisEngine synthesisEngine;
     private SettingsFunction settingsFunction;
+    private LogFunction logFunction;
 
     private TTSContext ttsContext;
 
@@ -45,6 +48,7 @@ public class TTSService extends TextToSpeechService {
         TTSApplication ttsApplication = ((TTSApplication) getApplicationContext());
         synthesisEngine = ttsApplication.getSynthesisEngine();
         settingsFunction = ttsApplication.getSettingsFunction();
+        logFunction = ttsApplication.getLogFunction();
         ttsContext = ttsApplication.getTtsContext();
     }
 
@@ -98,6 +102,8 @@ public class TTSService extends TextToSpeechService {
         SettingsData settings = settingsFunction.getSettings();
         if (!checkSettings(settings)) {
             callback.error();
+            // 记录失败日志
+            recordLog(settings, "", 0, false, "配置检查失败");
             return;
         }
 
@@ -114,13 +120,25 @@ public class TTSService extends TextToSpeechService {
         Log.d(LogTag.INFO, "收到语音合成请求, 待合成文本: " + text + "\n Language: " + request.getLanguage()
                 + ", SpeechRate: " + request.getSpeechRate() + ", Pitch: " + request.getPitch());
 
-        // 如果文本长度超过80个字符，进行拆分处理
-        if (text.length() > 80) {
-            Log.d(LogTag.INFO, "文本长度超过80字符，开始拆分处理");
-            synthesizeLongText(text, request, callback, settings);
-        } else {
-            synthesizeSingleText(text, request, callback, settings);
+        boolean success = true;
+        String errorMessage = null;
+
+        try {
+            // 如果文本长度超过80个字符，进行拆分处理
+            if (text.length() > 80) {
+                Log.d(LogTag.INFO, "文本长度超过80字符，开始拆分处理");
+                synthesizeLongText(text, request, callback, settings);
+            } else {
+                synthesizeSingleText(text, request, callback, settings);
+            }
+        } catch (Exception e) {
+            success = false;
+            errorMessage = e.getMessage();
+            Log.e(LogTag.ERROR, "语音合成失败: " + errorMessage);
         }
+
+        // 记录日志
+        recordLog(settings, text, text.length(), success, errorMessage);
 
         Log.d(LogTag.INFO, "语音合成任务执行完毕,耗时: " + (System.currentTimeMillis() - onSynthesizeStartTime) / 1000 + "秒");
     }
@@ -160,14 +178,28 @@ public class TTSService extends TextToSpeechService {
      */
     private boolean checkSettings(SettingsData settings) {
         if (settings == null) {
+            Log.e(LogTag.ERROR, "配置检查失败: settings为null");
             mainHandler.post(() -> Toast.makeText(getApplicationContext(), "语音引擎未配置", Toast.LENGTH_SHORT).show());
             return false;
         }
-        if (settings.getAppId().isBlank() || settings.getToken().isBlank()
-                || settings.getServiceCluster().isBlank() || settings.getSelectedSpeakerId().isBlank()) {
+
+        boolean appIdBlank = settings.getAppId().isBlank();
+        boolean tokenBlank = settings.getToken().isBlank();
+        boolean serviceClusterBlank = settings.getServiceCluster().isBlank();
+        boolean speakerIdBlank = settings.getSelectedSpeakerId().isBlank();
+
+        Log.d(LogTag.INFO, "配置检查 - appId空: " + appIdBlank +
+                ", token空: " + tokenBlank +
+                ", serviceCluster空: " + serviceClusterBlank +
+                ", speakerId空: " + speakerIdBlank);
+
+        if (appIdBlank || tokenBlank || serviceClusterBlank || speakerIdBlank) {
+            Log.e(LogTag.ERROR, "配置检查失败: 存在空字段");
             mainHandler.post(() -> Toast.makeText(getApplicationContext(), "语音引擎配置不可用", Toast.LENGTH_SHORT).show());
             return false;
         }
+
+        Log.d(LogTag.INFO, "配置检查通过");
         return true;
     }
 
@@ -267,8 +299,10 @@ public class TTSService extends TextToSpeechService {
     private void synthesizeSingleText(String text, SynthesisRequest request,
                                       SynthesisCallback callback, SettingsData settings) {
         synthesisEngine.create(settings.getAppId(), settings.getToken(),
-                settings.getSelectedSpeakerId(), settings.getServiceCluster(), settings.isEmotional());
-        synthesisEngine.startEngine(text, request.getSpeechRate(), null, request.getPitch());
+                settings.getSelectedSpeakerId(), settings.getServiceCluster(), settings.isEmotional(),
+                settings.getSampleRate(), settings.getEncoding(), settings.getEmotion(), settings.getExplicitLanguage());
+        synthesisEngine.startEngine(text, settings.getSpeedRatio(), settings.getLoudnessRatio(),
+                request.getPitch(), settings.getEmotionScale());
 
         try {
             callback.start(getApplicationContext().getResources().getInteger(R.integer.tts_sample_rate)
@@ -340,8 +374,10 @@ public class TTSService extends TextToSpeechService {
 
             // 为每个片段创建新的合成引擎实例
             synthesisEngine.create(settings.getAppId(), settings.getToken(),
-                    settings.getSelectedSpeakerId(), settings.getServiceCluster(), settings.isEmotional());
-            synthesisEngine.startEngine(segment, request.getSpeechRate(), null, request.getPitch());
+                    settings.getSelectedSpeakerId(), settings.getServiceCluster(), settings.isEmotional(),
+                    settings.getSampleRate(), settings.getEncoding(), settings.getEmotion(), settings.getExplicitLanguage());
+            synthesisEngine.startEngine(segment, settings.getSpeedRatio(), settings.getLoudnessRatio(),
+                    request.getPitch(), settings.getEmotionScale());
 
             try {
                 // 处理当前片段的音频数据
@@ -402,6 +438,66 @@ public class TTSService extends TextToSpeechService {
     }
 
     /**
+     * 记录TTS调用日志
+     *
+     * @param settings     配置信息
+     * @param text         合成文本
+     * @param textLength   文本长度
+     * @param success      是否成功
+     * @param errorMessage 错误信息
+     */
+    private void recordLog(SettingsData settings, String text, int textLength, boolean success, String errorMessage) {
+        try {
+            // 检查是否启用日志记录
+            if (!settingsFunction.getEnableLogging()) {
+                return;
+            }
+
+            // 从speakerId查找声音名称和场景
+            String speakerId = settings.getSelectedSpeakerId();
+            String speakerName = "";
+            String scene = "";
+
+            // 从资源文件中查找声音信息
+            String[] speakerList = getResources().getStringArray(R.array.speaker_list);
+            for (String speaker : speakerList) {
+                String[] parts = speaker.split("\\|");
+                if (parts.length >= 3 && parts[2].equals(speakerId)) {
+                    scene = parts[0];
+                    speakerName = parts[1];
+                    break;
+                }
+            }
+
+            // 如果没有找到，使用speakerId作为名称
+            if (speakerName.isEmpty()) {
+                speakerName = speakerId;
+            }
+            if (scene.isEmpty()) {
+                scene = "未知场景";
+            }
+
+            // 创建日志对象
+            TtsCallLog log = new TtsCallLog(
+                    System.currentTimeMillis(),
+                    speakerId,
+                    speakerName,
+                    scene,
+                    textLength,
+                    settings.isEmotional(),
+                    success,
+                    errorMessage
+            );
+
+            // 保存日志
+            logFunction.addLog(log);
+            Log.d(LogTag.INFO, "TTS调用日志已记录: " + (success ? "成功" : "失败"));
+        } catch (Exception e) {
+            Log.e(LogTag.ERROR, "记录TTS调用日志失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 播放演示文本合成效果
      * @param text 演示文本
      */
@@ -413,8 +509,9 @@ public class TTSService extends TextToSpeechService {
             return;
         }
         synthesisEngine.create(settings.getAppId(), settings.getToken(),
-                settings.getSelectedSpeakerId(), settings.getServiceCluster(), settings.isEmotional());
-        synthesisEngine.startEngine(text, null, null, null);
+                settings.getSelectedSpeakerId(), settings.getServiceCluster(), settings.isEmotional(),
+                settings.getSampleRate(), settings.getEncoding(), settings.getEmotion(), settings.getExplicitLanguage());
+        synthesisEngine.startEngine(text, settings.getSpeedRatio(), settings.getLoudnessRatio(), null, settings.getEmotionScale());
         do {
             ttsContext.audioDataQueue.take();
             Log.d(LogTag.INFO, "演示音频队列是否消费完成: " + ttsContext.isAudioQueueDone.get());
